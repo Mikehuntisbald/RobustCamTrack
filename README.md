@@ -1,2 +1,2 @@
 # RobustCamTrack
-RobustCamTrack with assistance of 
+RobustCamTrack with the assistance of LiDAR
