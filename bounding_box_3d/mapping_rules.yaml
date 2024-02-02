@@ -1,0 +1,23 @@
+- ros1_package_name: 'bounding_box_3d'
+  ros1_message_name: 'BoundingBox3D'  
+  ros2_package_name: 'bounding_box_3d'
+  ros2_message_name: 'BoundingBox3D'
+  fields_1_to_2:
+    header: 'header'
+    boxes: 'boxes'
+
+- ros1_package_name: 'bounding_box_3d'
+  ros1_message_name: 'Point3D'
+  ros2_package_name: 'bounding_box_3d'
+  ros2_message_name: 'Point3D'
+  fields_1_to_2:
+    x: 'x'
+    y: 'y'
+    z: 'z'
+    
+- ros1_package_name: 'bounding_box_3d'
+  ros1_message_name: 'Point3DArray'
+  ros2_package_name: 'bounding_box_3d'
+  ros2_message_name: 'Point3DArray'
+  fields_1_to_2:
+    vertices: 'vertices'
