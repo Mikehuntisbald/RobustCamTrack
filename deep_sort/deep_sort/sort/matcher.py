@@ -92,9 +92,9 @@ class Matcher:
             #     self.kf, detections[detection_idx])
             current_track_id_map1[self.tracks_1[track_idx].track_id.item()] = self.tracks_2[detection_idx].track_id.item()
             current_track_id_map2[self.tracks_2[detection_idx].track_id.item()] = self.tracks_1[track_idx].track_id.item()
-        print('previous')
-        print(current_track_id_map1)
-        print(current_track_id_map2)
+        # print('Raw Matches')
+        # print(current_track_id_map1)
+        # print(current_track_id_map2)
         
         # 此逻辑应用于相机Track id跳变的情况，应用LiDAR使之稳定
         # 遍历当前的LiDAR Track
@@ -126,7 +126,7 @@ class Matcher:
             #     self.track_id_map2_count[track_id_2] = 1
             
             # 如果连续 3+1 帧都有相同的匹配
-            if self.track_id_map2_count.get(track_id_2, None) == 1:
+            if self.track_id_map2_count.get(track_id_2, None) == 3:
                 # 不需要count了
                 self.track_id_map2_count.pop(track_id_2)
                 # 写入hits
@@ -159,18 +159,39 @@ class Matcher:
                 self.track_id_map2_count[track_id_2] = 0
 
         ### 核心
-                
+                ### 逻辑1：如果track2在当前帧的map中没有匹配，且hits2的map中有匹配，则用track2还原track1,但是这有可能导致出现两个track1 id相同的情况。因为可能当前帧track1不准，和其他的track2匹配了。
+                ### 逻辑2：针对逻辑1的缺陷，如果current_track_id_map1里有hits2的匹配track1 id，则从current_track_id_map2里删除当前track2的匹配，再用track2还原track1
         # 对于 tracks_2 中的每个 track
         for track_id_2, track_id_1 in current_track_id_map2.items():
-            # 有hits，当前track_id_1和hits的track_id_1匹配不一致，且上一帧有匹配
+            # 有hits，当前track_id_1和hits的track_id_1匹配不一致(但是hits2的匹配是可能在track1里面的)，且上一帧有匹配
             if self.track_id_map2_hits.get(track_id_2, None) is not None and self.track_id_map2_hits.get(track_id_2, None) != track_id_1 and self.track_id_map2.get(track_id_2, None) is not None:
                 #把当前帧的track id替换成hits中的track id
                 current_track_id_map2[track_id_2] = self.track_id_map2_hits[track_id_2]
+                
+                # 逻辑2
+                # current_track_id_map1.get(self.track_id_map2_hits.get(track_id_2, None), None)
+                # if current_track_id_map1.get(self.track_id_map2_hits.get(track_id_2, None), None) is not None:
+                #     redundant = self.track_id_map2_hits.get(track_id_2, None)
+                #     redundant_correspond = current_track_id_map1[redundant]
+                #     current_track_id_map1.pop(redundant)
+                #     self.tracks_1 = [track for track in self.tracks_1 if track.track_id.item() != redundant]
+                #     current_track_id_map2.pop(redundant_correspond)
+                #     for track in self.tracks_2:
+                #         if track.track_id.item() == track_id_2:
+                #             track.mark_missed()
+                # if current_track_id_map1.get(self.track_id_map2_hits.get(track_id_2, None), None) is not None:
+                self.tracks_1 = [track for track in self.tracks_1 if track.track_id.item() != self.track_id_map2_hits[track_id_2]]       
+                # print([track.track_id.item() for track in self.tracks_1])    
                 for track in self.tracks_1:
                     if track.track_id.item() == track_id_1:
                         track.track_id = np.array(self.track_id_map2_hits[track_id_2])
-
-        print('hits', self.track_id_map2_hits)
+                        track.is_restored = True
+                        # print(self.track_id_map2_hits[track_id_2])
+                        current_track_id_map2[track_id_2] = self.track_id_map2_hits[track_id_2]
+        # print([track.track_id.item() for track in self.tracks_1])
+        
+        # print([track.track_id.item() for track in self.tracks_1])
+        # print('hits', self.track_id_map2_hits)
                 
 
         # # 对于 tracks_1 中的每个 track
@@ -183,19 +204,33 @@ class Matcher:
         #             track.track_id = track_id_1_hit
         #TODO 将替换的ID发回相机Tracker，替换相机Tracker中的ID
         # 遍历LiDAR Track当前帧检测
+        print([track.track_id.item() for track in self.tracks_1])                
         for idx, track2 in enumerate(self.tracks_2):
-            # 如果当前帧的检测在上一帧的map中有映射（有匹配）
-            if track2.track_id.item() in self.track_id_map2.keys():
+            # 如果当前帧的检测在上一帧的map中有映射（有匹配）且hits中有记录
+            if track2.track_id.item() in self.track_id_map2.keys() and track2.track_id.item() in self.track_id_map2_hits.keys():
                 # 如果当前帧的检测在当前帧的map中没有匹配
                 # if current_track_id_map2[track2.track_id.item()] not in current_track_id_map1.keys():
                 #     track2.mark_missed()
-                if current_track_id_map2.get(track2.track_id.item(), None) is None:
-                    # 在track1中用LiDAR当前帧的检测，上一帧LiDAR对应相机的Track id，is_restored属性为True，初始化一个新的track
-                    # 并在当前帧的map中添加恢复的track id的映射
-                    self._initiate_track_1(detections[idx], self.track_id_map2.get(track2.track_id.item(), None), True)
-                    current_track_id_map1[self.track_id_map2.get(track2.track_id.item(), None)] = track2.track_id.item()
-                    current_track_id_map2[track2.track_id.item()] = self.track_id_map2.get(track2.track_id.item(), None)
-
+                if current_track_id_map2.get(track2.track_id.item(), None) is None and len([track for track in self.tracks_1 if track.track_id.item() == track2.track_id.item()]) == 0 :
+                    # 如果是由于lidar框多导致匹配跳变，修改hits，新建track1，删除原来的track1
+                    # 如果这个没有匹配的track2在hits对应的track1 id在current_track_id_map1中有匹配，那么就把这个对应的匹配代替当前的track2_id
+                    if current_track_id_map1.get(self.track_id_map2_hits[track2.track_id.item()], None) is not None:
+                        track_id_2_new = current_track_id_map1.get(self.track_id_map2_hits[track2.track_id.item()], None)
+                        track_id_1_hit = self.track_id_map2_hits[track2.track_id.item()]
+                        self.track_id_map2_hits.pop(track2.track_id.item())
+                        self.track_id_map2_hits[track_id_2_new] = track_id_1_hit
+                        # current_track_id_map2[self.track_id_map2_hits[track2.track_id.item()]] = track2.track_id.item()
+                        # current_track_id_map1[self.track_id_map2_hits[track2.track_id.item()]] = self.track_id_map2_hits[track2.track_id.item()]
+                        self.tracks_1 = [track for track in self.tracks_1 if track.track_id.item() != track_id_1_hit]
+                        self._initiate_track_1(detections[idx], np.array(track_id_1_hit), True)
+                    else :
+                        # 在track1中用LiDAR当前帧的检测，上一帧LiDAR对应相机的Track id，is_restored属性为True，初始化一个新的track
+                        # 并在当前帧的map中添加恢复的track id的映射
+                        self.tracks_1 = [track for track in self.tracks_1 if track.track_id.item() != self.track_id_map2_hits.get(track2.track_id.item(), None)]
+                        self._initiate_track_1(detections[idx], np.array(self.track_id_map2_hits.get(track2.track_id.item(), None)), True)
+                        current_track_id_map1[self.track_id_map2_hits.get(track2.track_id.item(), None)] = track2.track_id.item()
+                        current_track_id_map2[track2.track_id.item()] = self.track_id_map2_hits.get(track2.track_id.item(), None)
+        # print([track.track_id for track in self.tracks_1])
 # if current_track_id_map2.get(track2.track_id.item(), None) is None:
 #                     track_id_list = [track.track_id.item() for track in self.tracks_1]
 #                     if self.track_id_map2[track2.track_id.item()] not in track_id_list:
@@ -205,10 +240,11 @@ class Matcher:
 #                         self._initiate_track_1(detections[idx], self.track_id_map2.get(track2.track_id.item(), None), True)
 #                         current_track_id_map1[self.track_id_map2.get(track2.track_id.item(), None)] = track2.track_id.item()
 #                         current_track_id_map2[track2.track_id.item()] = self.track_id_map2.get(track2.track_id.item(), None)
-                    
-        print('after')
-        print(current_track_id_map1)
-        print(current_track_id_map2)
+        print([track.track_id.item() for track in self.tracks_1])
+        print(" ")            
+        # print('Restored Matches')
+        # print(current_track_id_map1)
+        # print(current_track_id_map2)
         self.no_detection(current_track_id_map2)
         
 
@@ -248,25 +284,40 @@ class Matcher:
         # self.metric.partial_fit(
         #     np.asarray(features), np.asarray(targets), active_targets)
 
+    # def no_detection(self, current_track_id_map2):
+    #     flag = False
+    #     # 遍历hits_activate
+    #     for activate_track_id_2 in self.track_id_map2_hits_activate.keys():
+    #         # 如果hits_activate中的track id在当前帧的map中没有匹配
+    #         if activate_track_id_2 not in current_track_id_map2.keys():
+    #             # hits_activate - 1
+    #             self.track_id_map2_hits_activate[activate_track_id_2] -= 1
+    #             # 如果hits_activate == 0
+    #             if self.track_id_map2_hits_activate[activate_track_id_2] == 0:
+    #                 # hits_activate归零
+    #                 self.track_id_map2_hits.pop(activate_track_id_2)
+    #                 # self.track_id_map1_hits.pop(self.track_id_map2_hits[activate_track_id_2])
+    #                 print('pop')
+    #                 self.track_id_map2_hits_activate.pop(activate_track_id_2)
+    #                 flag = True
+    #                 break
+    #     if flag == True:
+    #         self.no_detection(current_track_id_map2)
+
     def no_detection(self, current_track_id_map2):
-        flag = False
-        # 遍历hits_activate
+        to_delete = []  # 存储需要删除的键
+        # 遍历并收集需要删除的键
         for activate_track_id_2 in self.track_id_map2_hits_activate.keys():
-            # 如果hits_activate中的track id在当前帧的map中没有匹配
-            if activate_track_id_2 not in current_track_id_map2.keys():
-                # hits_activate - 1
+            if activate_track_id_2 not in current_track_id_map2:
                 self.track_id_map2_hits_activate[activate_track_id_2] -= 1
-                # 如果hits_activate == 0
                 if self.track_id_map2_hits_activate[activate_track_id_2] == 0:
-                    # hits_activate归零
-                    self.track_id_map2_hits.pop(activate_track_id_2)
-                    # self.track_id_map1_hits.pop(self.track_id_map2_hits[activate_track_id_2])
-                    print('pop')
-                    self.track_id_map2_hits_activate.pop(activate_track_id_2)
-                    flag = True
-                    break
-        if flag == True:
-            self.no_detection(current_track_id_map2)
+                    to_delete.append(activate_track_id_2)
+        
+        # 在遍历完成后删除条目
+        for key in to_delete:
+            self.track_id_map2_hits.pop(key, None)
+            self.track_id_map2_hits_activate.pop(key, None)
+
     def _initiate_track(self, detection):
         mean, covariance = self.kf.initiate(detection.to_xyah())
         self.tracks.append(Match(
