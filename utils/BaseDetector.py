@@ -6,7 +6,7 @@ class baseDet(object):
 
     def __init__(self):
 
-        self.img_size = 1242
+        self.img_size = 640
         self.threshold = 0.3
         self.stride = 1
 
@@ -22,7 +22,7 @@ class baseDet(object):
 
         self.font = cv2.FONT_HERSHEY_SIMPLEX
 
-    def feedCap(self, im, func_status):
+    def feedCap(self, im):
 
         retDict = {
             'frame': None,
