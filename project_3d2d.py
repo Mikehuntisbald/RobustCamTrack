@@ -237,7 +237,7 @@ class Detector:
         # filename = f'/home/sam/Downloads/bag-synced/kitti/restore/image_{self.count}.png'  # 为每个图像生成唯一的文件名
         # self.count += 1
         # cv2.imwrite(filename, cv_image)
-        self._imagepub.publish(self._bridge.cv2_to_imgmsg(scene, 'bgr8'))
+        self._imagepub.publish(self._bridge.cv2_to_imgmsg(scene, 'rgb8'))
         print('Process Time: ', rospy.Time.now() - t1)
             
     def project_3d_bbox_to_2d(self, bbox_3d, cv_image):

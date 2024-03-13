@@ -7,6 +7,7 @@ import pandas
 import cv2
 import matplotlib.pyplot as plt 
 import torch
+import random
 
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs import point_cloud2 as pc2
@@ -27,26 +28,31 @@ class Correlator:
         # 创建两个订阅者，订阅不同的主题
         sub1 = message_filters.Subscriber('/bbox_camera', BoundingBoxArray)
         sub2 = message_filters.Subscriber('/bbox_lidar', BoundingBoxArray)
-        rospy.Subscriber(image_topic, Image, self.image_callback)
+        sub3 = message_filters.Subscriber(image_topic, Image)
+        # rospy.Subscriber(image_topic, Image, self.image_callback)
         
         # 使用 ApproximateTime 策略进行软同步
-        ts = message_filters.ApproximateTimeSynchronizer([sub1, sub2], 10, 0.1, allow_headerless=True)
+        ts = message_filters.ApproximateTimeSynchronizer([sub1, sub2, sub3], 10, 0.1, allow_headerless=True)
         ts.registerCallback(self.callback)
         
         self._bridge = CvBridge()
-        self.deep_weights = '/home/sam/iv_ws/src/tracker/src/deep_sort/model_data/mars-small128.pb'
+        # self.deep_weights = '/home/sam/iv_ws/src/tracker/src/deep_sort/model_data/mars-small128.pb'
         self.metric = nn_matching.NearestNeighborDistanceMetric("cosine", 0.5, 100)
         self.matcher = Matcher(self.metric, max_iou_distance = 0.7, max_age = 70, n_init = 3)
         self._imagepub = rospy.Publisher('/labeled_detect', Image, queue_size=10)
+
+        self.count = 0
+        self.selected_track_id = 0
+        self.save = []
         print('init')
 
-    def callback(self, msg1, msg2):
+    def callback(self, msg1, msg2, msg3):
         flag = rospy.get_param('/flag', False)
         print("frame", int(msg1.header.stamp.to_sec()))
         # 把msg转换成能处理的Detection格式
-        model_filename = self.deep_weights #Change it to your directory
+        # model_filename = self.deep_weights #Change it to your directory
         # encoder = generate_detections.create_box_encoder(model_filename)
-        scene = self._bridge.imgmsg_to_cv2(self._current_image, 'rgb8')
+        scene = self._bridge.imgmsg_to_cv2(msg3, 'rgb8')
         detect1 = []
         scores1 = []
         name1 = []
@@ -59,7 +65,7 @@ class Correlator:
         # features1 = encoder(scene, detect1)
         features1 = None
         # detections_1 = [Detection(bbox, score, feature) for bbox,score, feature in zip(detect1,scores1, features1)]
-        detections_1 = [Detection(bbox, score, None) for bbox,score in zip(detect1,scores1)]
+        detections_1 = [Detection(bbox, 'car', score, None) for bbox,score in zip(detect1,scores1)]
 
         detect2 = []
         scores2 = []
@@ -73,14 +79,68 @@ class Correlator:
         # features2 = encoder(scene, detect2)
         features2 = None
         # detections_2 = [Detection(bbox, score, feature) for bbox,score, feature in zip(detect2,scores2, features2)]
-        detections_2 = [Detection(bbox, score, None) for bbox,score in zip(detect2,scores2)]
+        detections_2 = [Detection(bbox, 'car', score, None) for bbox,score in zip(detect2,scores2)]
 
         for ind, detection in enumerate(detections_1):
             self.matcher._initiate_track_1(detection, id1[ind])
         for ind, detection in enumerate(detections_2):
             self.matcher._initiate_track_2(detection, id2[ind])
+
+        # if flag == True:
+        #     if (self.matcher.tracks_1 and self.count >= 10) or self.selected_track_id == 0:
+        #         # 随机选择一个元素
+        #         self.selected_track_id = random.choice(self.matcher.tracks_1).track_id.item()
+        #         if self.selected_track_id not in self.save:
+        #             pass
+        #         else:
+        #             wbbox = [0, 0, 0, 0]
+        #             for track in self.matcher.tracks_1 :
+        #                 if track.track_id.item() == self.selected_track_id :
+        #                     wbbox = track.to_tlbr()
+        #                     break
+        #             # 保留未被选中的元素
+        #             self.matcher.tracks_1 = [track for track in self.matcher.tracks_1 if track.track_id.item() != self.selected_track_id]
+
+        #             cv2.rectangle(scene, (int(wbbox[0]), int(wbbox[1])), (int(wbbox[2]), int(wbbox[3])), (255, 255, 255), -1)
+        #             self.count = 1
+        #     else:
+        #         wbbox = [0, 0, 0, 0]
+        #         for track in self.matcher.tracks_1 :
+        #             if track.track_id.item() == self.selected_track_id:
+        #                 wbbox = track.to_tlbr()
+        #                 break
+        #         self.matcher.tracks_1 = [track for track in self.matcher.tracks_1 if track.track_id.item() != self.selected_track_id]
+        #         cv2.rectangle(scene, (int(wbbox[0]), int(wbbox[1])), (int(wbbox[2]), int(wbbox[3])), (255, 255, 255), -1)
+        #         self.count+=1
+            
+        wbbox = [0, 0, 0, 0]
         if flag == True:
-            self.matcher.tracks_1 = [track for track in self.matcher.tracks_1 if track.track_id.item() != 2]
+            if (self.matcher.tracks_1 and self.count >= 10) or self.selected_track_id == 0:
+                # 确定需要保留的轨迹数量（一半）
+                num_tracks_to_keep = len(self.matcher.tracks_1) // 2
+                # 随机选择一半的轨迹
+                selected_tracks = random.sample(self.matcher.tracks_1, num_tracks_to_keep)
+                
+                # 对于每个被选中的轨迹
+                for track in selected_tracks:
+                    # 获取轨迹的边界框并绘制
+                    wbbox = track.to_tlbr()
+                    cv2.rectangle(scene, (int(wbbox[0]), int(wbbox[1])), (int(wbbox[2]), int(wbbox[3])), (255, 255, 255), -1)
+                    # 保留未被选中的元素
+                    self.matcher.tracks_1 = [track for track in self.matcher.tracks_1 if track not in selected_tracks]
+
+                    # cv2.rectangle(scene, (int(wbbox[0]), int(wbbox[1])), (int(wbbox[2]), int(wbbox[3])), (255, 255, 255), -1)
+                    self.count = 1
+            else:
+                
+                selected_tracks = random.sample(self.matcher.tracks_1, num_tracks_to_keep)
+        
+                for track in selected_tracks:
+                    wbbox = track.to_tlbr()
+                    cv2.rectangle(scene, (int(wbbox[0]), int(wbbox[1])), (int(wbbox[2]), int(wbbox[3])), (255, 255, 255), -1)
+                
+                self.matcher.tracks_1 = [track for track in self.matcher.tracks_1 if track not in selected_tracks]
+                self.count+=1
 
         self.matcher.update(detections_2)
 
@@ -90,11 +150,14 @@ class Correlator:
         # 示例文件名，您可以根据需要修改
         output_filename = "/home/sam/tracking_output.txt"
         # 打开文件准备写入
+        # print(self.save)
         with open(output_filename, "a") as file:
             for track in self.matcher.tracks_1:
-                # if track.is_confirmed() and track.time_since_update > 1: # se o objeto foi confirmado e nao foi atualizado a mais de 1 frame
+                ## 第一次出现，且没有匹配掠过
+                # if track.track_id.item() not in self.save and self.matcher.current_track_id_map1.get(track.track_id.item(), None) is None:
+                #     print('omitted')
                 #     continue
-                # print(type(track))
+
                 bbox = track.to_tlbr()
                 track_id = track.track_id
 
@@ -102,7 +165,7 @@ class Correlator:
                 kitti_format_str = f"{frame} {track_id} Car -1 -1 -10 {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} -1 -1 -1 -1000 -1000 -1000 -10\n"
 
                 # 写入文件
-                file.write(kitti_format_str)
+                # file.write(kitti_format_str)
 
                 xmin, ymin, xmax, ymax = bbox[0], bbox[1], bbox[2], bbox[3]
                 # cv2.rectangle(scene, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 0), 2)
@@ -114,13 +177,20 @@ class Correlator:
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 thickness = 2  # 文本线条厚度
                 # if track.restored and flag == True:
+                # if track.track_id.item() not in self.save and self.matcher.current_track_id_map1.get(track.track_id.item(), None) is None:
+                #     print('omitted')
+                #     cv2.putText(scene, label, (int(bbox[0]), int(bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+                #     cv2.rectangle(scene, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 0), 2)
+                #     continue
                 if track.restored and flag == False:
                     # label = f"ID: {track_id} Retrieved"
                     # cv2.putText(scene, label, (int(bbox[0]), int(bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 3)
                     # cv2.rectangle(scene, (int(xmin), int(ymin)), (int(xmax), int(ymax)), (255, 255, 255), -1)
+
                     cv2.putText(scene, label, (int(bbox[0]), int(bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                    cv2.rectangle(scene, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 0), 2)
+                    cv2.rectangle(scene, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (255, 255, 0), 2)
                     
+                    file.write(kitti_format_str)
                     text = "Attack Detected"
                     text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
                     text_x = scene.shape[1] - text_size[0] - 10  # 距离右边 10 像素
@@ -132,6 +202,7 @@ class Correlator:
                 else:
                     cv2.putText(scene, label, (int(bbox[0]), int(bbox[1])), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
                     cv2.rectangle(scene, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 0), 2)
+                    file.write(kitti_format_str)
                     # text = "No Attack"
                     # text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
                     # text_x = scene.shape[1] - text_size[0] - 10  # 距离右边 10 像素
@@ -140,7 +211,7 @@ class Correlator:
                     # font_color = (0, 255, 0)
                     # # 在图像上绘制文本
                     # cv2.putText(scene, text, (text_x, text_y), font, font_scale, font_color, thickness)
-
+        self.save = [track.track_id.item() for track in self.matcher.tracks_1]
         self.matcher.tracks_1 = []
         self.matcher.tracks_2 = []
         self._imagepub.publish(self._bridge.cv2_to_imgmsg(scene, 'rgb8'))

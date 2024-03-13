@@ -18,12 +18,10 @@ def plot_bboxes(image, bboxes, line_thickness=None):
     tl = line_thickness or round(
         0.002 * (image.shape[0] + image.shape[1]) / 2) + 1  # line/font thickness
     for (x1, y1, x2, y2, cls_id, pos_id) in bboxes:
-        if cls_id in ['smoke', 'phone', 'eat']:
+        if cls_id in ['person']:
             color = (0, 0, 255)
         else:
             color = (0, 255, 0)
-        if cls_id == 'eat':
-            cls_id = 'eat-drink'
         c1, c2 = (x1, y1), (x2, y2)
         cv2.rectangle(image, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
         tf = max(tl - 1, 1)  # font thickness
@@ -38,37 +36,68 @@ def plot_bboxes(image, bboxes, line_thickness=None):
 
 def update_tracker(target_detector, image):
 
-        new_faces = []
-        _, bboxes = target_detector.detect(image)
+    new_faces = []
+    _, bboxes = target_detector.detect(image)
 
-        bbox_xywh = []
-        confs = []
-        bboxes2draw = []
-        face_bboxes = []
-        if len(bboxes):
+    bbox_xywh = []
+    confs = []
+    clss = []
 
-            # Adapt detections to deep sort input format
-            for x1, y1, x2, y2, _, conf in bboxes:
-                
-                obj = [
-                    int((x1+x2)/2), int((y1+y2)/2),
-                    x2-x1, y2-y1
-                ]
-                bbox_xywh.append(obj)
-                confs.append(conf)
+    for x1, y1, x2, y2, cls_id, conf in bboxes:
 
-            xywhs = torch.Tensor(bbox_xywh)
-            confss = torch.Tensor(confs)
+        obj = [
+            int((x1+x2)/2), int((y1+y2)/2),
+            x2-x1, y2-y1
+        ]
+        bbox_xywh.append(obj)
+        confs.append(conf)
+        clss.append(cls_id)
 
-            # Pass detections to deepsort
-            outputs = deepsort.update(xywhs, confss, image)
+    xywhs = torch.Tensor(bbox_xywh)
+    confss = torch.Tensor(confs)
 
-            for value in list(outputs):
-                x1,y1,x2,y2,track_id = value
-                bboxes2draw.append(
-                    (x1, y1, x2, y2, '', track_id)
-                )
-        face_bboxes = bboxes2draw
-        image = plot_bboxes(image, bboxes2draw)
+    outputs = deepsort.update(xywhs, confss, clss, image)
 
-        return image, new_faces, face_bboxes
+    bboxes2draw = []
+    face_bboxes = []
+    current_ids = []
+
+    for value in list(outputs):
+        x1,y1,x2,y2,cls_,track_id = value
+        bboxes2draw.append(
+            (x1, y1, x2, y2, cls_, track_id)
+        )
+    face_bboxes = bboxes2draw
+    image = plot_bboxes(image, bboxes2draw)
+
+    return image, new_faces, face_bboxes
+
+    # for value in list(outputs):
+    #     x1, y1, x2, y2, cls_, track_id = value
+    #     bboxes2draw.append(
+    #         (x1, y1, x2, y2, cls_, track_id)
+    #     )
+    #     current_ids.append(track_id)
+    #     if cls_ == 'face':
+    #         if not track_id in target_detector.faceTracker:
+    #             target_detector.faceTracker[track_id] = 0
+    #             face = image[y1:y2, x1:x2]
+    #             new_faces.append((face, track_id))
+    #         face_bboxes.append(
+    #             (x1, y1, x2, y2)
+    #         )
+
+    # ids2delete = []
+    # for history_id in target_detector.faceTracker:
+    #     if not history_id in current_ids:
+    #         target_detector.faceTracker[history_id] -= 1
+    #     if target_detector.faceTracker[history_id] < -5:
+    #         ids2delete.append(history_id)
+
+    # for ids in ids2delete:
+    #     target_detector.faceTracker.pop(ids)
+    #     print('-[INFO] Delete track id:', ids)
+
+    # image = plot_bboxes(image, bboxes2draw)
+
+    # return image, new_faces, face_bboxes

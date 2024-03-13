@@ -1,10 +1,10 @@
 import torch
 import numpy as np
 from models.experimental import attempt_load
-from utils.general import non_max_suppression, scale_coords, letterbox
-from utils.torch_utils import select_device
+from utils.general import non_max_suppression, scale_coords
 from utils.BaseDetector import baseDet
-
+from utils.torch_utils import select_device
+from utils.datasets import letterbox
 
 class Detector(baseDet):
 
@@ -15,7 +15,7 @@ class Detector(baseDet):
 
     def init_model(self):
 
-        self.weights = 'weights/yolov5m.pt'
+        self.weights = 'weights/yolov5s.pt'
         self.device = '0' if torch.cuda.is_available() else 'cpu'
         self.device = select_device(self.device)
         model = attempt_load(self.weights, map_location=self.device)
@@ -57,8 +57,7 @@ class Detector(baseDet):
 
                 for *x, conf, cls_id in det:
                     lbl = self.names[int(cls_id)]
-                    # if not lbl in ['person', 'car', 'truck']:
-                    if not lbl in ['person']:
+                    if not lbl in ['person', 'car', 'truck']:
                         continue
                     x1, y1 = int(x[0]), int(x[1])
                     x2, y2 = int(x[2]), int(x[3])
